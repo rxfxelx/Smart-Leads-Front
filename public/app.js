@@ -1,5 +1,9 @@
+// === BACKEND REMOTO (prefixo fixo) ===
+const API_BASE = 'https://smart-leads-back-production.up.railway.app'.replace(/\/+$/, '');
+const apiFetch = (path, opts = {}) => fetch(`${API_BASE}${path}`, opts);
+
 async function fetchStatus() {
-  const r = await fetch('/api/status')
+  const r = await apiFetch('/api/status')
   const s = await r.json()
   const el = document.getElementById('status')
   el.innerHTML = `
@@ -85,7 +89,7 @@ document.getElementById('run').addEventListener('click', async () => {
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Rodando...'
   prog.textContent = 'Buscando lugares e validando... isso pode levar alguns segundos.'
   try {
-    const r = await fetch('/api/run', {
+    const r = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ city, segment, total })
@@ -137,18 +141,11 @@ document.getElementById('validate-csv').addEventListener('click', async () => {
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Validando...'
 
   try {
-    // Envia apenas os phones E.164? O servidor formata dentro do pipeline /api/run, então aqui usaremos /api/run fake
-    // Vamos reutilizar /api/run simulando uma busca "manual": manda city=Manual e segment=CSV, e total = len
-    // Mas precisamos adaptar: melhor chamar um endpoint específico? Para simplificar, vamos fazer um POST para /api/run com city='Manual (CSV)'
-    // e permitir que o servidor ignore Google se city === '__CSV__' – por simplicidade, vamos validar client-side chamando /api/run não é ideal.
-    // Como não temos endpoint dedicado, vamos apenas mandar os números para o servidor por fetch('/api/run')? Não.
-    // Em vez disso, montamos o objeto esperado pelo usuário e deixamos sem validação quando provider = NONE.
-    // Para não complicar, simplesmente fazemos uma chamada rápida: enviaremos para /api/run com city="CSV", segment="lista", total=uploadedRows.length
-    // Isso não valida os números do CSV. Então faremos melhor: vamos criar um endpoint /api/validate aqui? (não implementado no servidor).
-    // Alternativa: usar /api/status para saber provider e validar client-side? Não.
-    // -> Ajuste: chamaremos /api/status para saber o provider e então enviar para /api/validateNumbers (não existe).
+    // (Opcional) quando seu backend tiver um /api/validate, é só trocar por:
+    // const numbers = uploadedRows.map(r => r.phone).filter(Boolean)
+    // const r = await apiFetch('/api/validate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ numbers }) })
+    // const data = await r.json(); // montar a tabela com os resultados
   } catch (e) {}
-  // Plano B simples: sem endpoint dedicado, reaproveitamos a mesma tela principal. Para não confundir, vamos só exibir "Em breve".
   prog.textContent = 'No pacote base, a validação de CSV usa a mesma tela principal (aba Cidade). Para validar CSV aqui, crie um endpoint dedicado.'
   btn.disabled = false; btn.textContent = 'Validar WhatsApp'
 })
