@@ -1,6 +1,6 @@
 // === BACKEND REMOTO (prefixo fixo) ===
 const API_BASE = 'https://smart-leads-back-production.up.railway.app'.replace(/\/+$/, '');
-const apiFetch = (path, opts = {}) => fetch(`${API_BASE}${path}`, opts);
+const apiFetch = (path, opts = {}) => fetch(`${API_BASE}${path}`, { mode: 'cors', ...opts });
 
 async function fetchStatus() {
   const r = await apiFetch('/api/status')
@@ -64,7 +64,7 @@ function escapeHtml(str) {
   })[m])
 }
 
-// Aba/tabs
+// Tabs
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'))
@@ -115,7 +115,6 @@ document.getElementById('file').addEventListener('change', async (ev) => {
   const file = ev.target.files[0]
   if (!file) return
   const text = await file.text()
-  // parse super simples (CSV bem comportado)
   const lines = text.split(/\r?\n/).filter(Boolean)
   const header = lines.shift().split(',').map(s => s.trim().toLowerCase())
   const idxName = header.indexOf('name')
@@ -141,13 +140,38 @@ document.getElementById('validate-csv').addEventListener('click', async () => {
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Validando...'
 
   try {
-    // (Opcional) quando seu backend tiver um /api/validate, é só trocar por:
-    // const numbers = uploadedRows.map(r => r.phone).filter(Boolean)
-    // const r = await apiFetch('/api/validate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ numbers }) })
-    // const data = await r.json(); // montar a tabela com os resultados
-  } catch (e) {}
-  prog.textContent = 'No pacote base, a validação de CSV usa a mesma tela principal (aba Cidade). Para validar CSV aqui, crie um endpoint dedicado.'
-  btn.disabled = false; btn.textContent = 'Validar WhatsApp'
+    const numbers = uploadedRows.map(r => r.phone).filter(Boolean)
+    const r = await apiFetch('/api/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numbers })
+    })
+    const data = await r.json()
+    if (!data.ok) throw new Error(data.error || 'Falha na validação')
+
+    // mapear raw->resultado e montar tabela
+    const byRaw = new Map(data.results.map(x => [x.raw, x]))
+    const rows = uploadedRows.map(r => {
+      const hit = byRaw.get(r.phone) || {}
+      return {
+        name: r.name || '',
+        phone_e164: hit.e164 || '',
+        phone: r.phone || '',
+        wa_status: hit.status || 'unknown',
+        address: r.address || '',
+        source: 'CSV'
+      }
+    })
+    renderTable(rows, 'results-csv')
+    dl.disabled = false
+    dl.onclick = () => download(`meu_csv_validado_${Date.now()}.csv`, toCSV(rows))
+    prog.textContent = `Feito. ${rows.length} contatos validados.`
+  } catch (e) {
+    console.error(e)
+    prog.textContent = 'Erro: ' + e.message
+  } finally {
+    btn.disabled = false; btn.textContent = 'Validar WhatsApp'
+  }
 })
 
 document.getElementById('download-csv').addEventListener('click', () => {})
