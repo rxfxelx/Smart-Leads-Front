@@ -2,22 +2,31 @@
 const API_BASE = 'https://smart-leads-back-production.up.railway.app'.replace(/\/+$/, '');
 const apiFetch = (path, opts = {}) => fetch(`${API_BASE}${path}`, { mode: 'cors', ...opts });
 
+let currentRows = []; // guarda a última lista buscada (sem validação)
+
 async function fetchStatus() {
-  const r = await apiFetch('/api/status');
-  const s = await r.json();
   const el = document.getElementById('status');
-  el.innerHTML = `
-    <div><b>Validador:</b> ${s.validationProvider}</div>
-    <div><b>Busca:</b> ${s.searchMode}</div>
-    <div class="hint" style="margin-top:8px">
-      Modo manual: o servidor abre o Google, entra nos sites e raspa os telefones.
-    </div>
-  `;
+  try {
+    const r = await apiFetch('/api/status');
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) throw new Error(`Status HTTP ${r.status}`);
+    const s = await r.json();
+    el.innerHTML = `
+      <div><b>Validador:</b> ${s.validationProvider}</div>
+      <div><b>Busca:</b> ${s.searchMode}</div>
+      <div class="hint" style="margin-top:8px">
+        Agora a busca <b>não valida</b> automaticamente. Clique em <b>Validar WhatsApp</b> se quiser validar os números retornados.
+      </div>
+    `;
+  } catch (err) {
+    el.textContent = 'Não foi possível carregar o status do servidor.';
+  }
 }
 
 function badge(status) {
-  const cls = status === 'valid' ? 'ok' : status === 'invalid' ? 'invalid' : 'unknown';
-  return `<span class="badge ${cls}">${status}</span>`;
+  const s = status || 'unvalidated';
+  const cls = s === 'valid' ? 'ok' : s === 'invalid' ? 'invalid' : 'unknown';
+  return `<span class="badge ${cls}">${s}</span>`;
 }
 
 function renderTable(rows, targetId) {
@@ -29,7 +38,7 @@ function renderTable(rows, targetId) {
   const body = rows.map(r => `<tr>
     <td>${escapeHtml(r.name || '')}</td>
     <td>${escapeHtml(r.phone_e164 || r.phone || '')}</td>
-    <td>${badge(r.wa_status || 'unknown')}</td>
+    <td>${badge(r.wa_status)}</td>
     <td>${escapeHtml(r.address || '')}</td>
     <td>${escapeHtml(r.source || '')}</td>
   </tr>`).join('');
@@ -42,7 +51,13 @@ function toCSV(rows) {
     const s = (v ?? '').toString();
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const body = rows.map(r => [esc(r.name), esc(r.phone_e164||r.phone), esc(r.wa_status||'unknown'), esc(r.address||''), esc(r.source||'')].join(',')).join('\n');
+  const body = rows.map(r => [
+    esc(r.name),
+    esc(r.phone_e164 || r.phone),
+    esc(r.wa_status || 'unvalidated'),
+    esc(r.address || ''),
+    esc(r.source || '')
+  ].join(',')).join('\n');
   return header + body + '\n';
 }
 
@@ -73,41 +88,98 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
+// Buscar (sem validar)
 document.getElementById('run').addEventListener('click', async () => {
   const city = document.getElementById('city').value.trim();
   const segment = document.getElementById('segment').value.trim();
   const total = parseInt(document.getElementById('total').value, 10) || 50;
   const prog = document.getElementById('progress');
-  const btn = document.getElementById('run');
-  const dl  = document.getElementById('download');
+  const btn  = document.getElementById('run');
+  const btnVal = document.getElementById('validate');
+  const dl   = document.getElementById('download');
   document.getElementById('results').innerHTML = '';
-  dl.disabled = true;
+  currentRows = [];
+  dl.disabled = true; btnVal.disabled = true;
 
   if (!city) { alert('Informe a cidade/região'); return; }
-  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Rodando...';
-  prog.textContent = 'Buscando no Google, abrindo sites e validando via Click-to-Chat...';
+  btn.disabled = true; btn.textContent = 'Buscando...';
+  prog.textContent = 'Abrindo buscadores, entrando nos sites e raspando telefones...';
+
   try {
     const r = await apiFetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ city, segment, total })
     });
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) {
+      throw new Error(`Resposta não é JSON (status ${r.status}).`);
+    }
     const data = await r.json();
     if (!data.ok) throw new Error(data.error || 'Falha');
-    renderTable(data.rows, 'results');
-    const csv = data.csv || toCSV(data.rows);
+
+    // Garante que venham sem validação
+    currentRows = (data.rows || []).map(row => ({
+      ...row,
+      wa_status: row.wa_status || 'unvalidated'
+    }));
+
+    renderTable(currentRows, 'results');
+    const csv = data.csv || toCSV(currentRows);
     dl.disabled = false;
     dl.onclick = () => download(`leads_${Date.now()}.csv`, csv);
-    prog.textContent = `Feito. ${data.total} contatos.`;
+    btnVal.disabled = currentRows.length === 0;
+    prog.textContent = `Feito. ${currentRows.length} contatos (sem validação).`;
   } catch (e) {
     console.error(e);
     prog.textContent = 'Erro: ' + e.message;
   } finally {
-    btn.disabled = false; btn.textContent = 'Buscar + Validar';
+    btn.disabled = false; btn.textContent = 'Buscar';
   }
 });
 
-// CSV validate tab
+// Validar a lista carregada
+document.getElementById('validate').addEventListener('click', async () => {
+  if (!currentRows.length) { alert('Faça uma busca primeiro.'); return; }
+  const prog = document.getElementById('progress');
+  const btnVal = document.getElementById('validate');
+  const dl   = document.getElementById('download');
+
+  btnVal.disabled = true; btnVal.textContent = 'Validando...';
+  prog.textContent = 'Verificando WhatsApp via Click‑to‑Chat...';
+
+  try {
+    const numbers = currentRows.map(r => r.phone_e164 || r.phone).filter(Boolean);
+    const r = await apiFetch('/api/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numbers })
+    });
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) throw new Error(`Resposta não é JSON (status ${r.status}).`);
+    const data = await r.json();
+    if (!data.ok) throw new Error(data.error || 'Falha na validação');
+
+    const byE164 = new Map((data.results || []).map(x => [x.e164, x.status]));
+    currentRows = currentRows.map(row => ({
+      ...row,
+      wa_status: byE164.get(row.phone_e164 || row.phone) || row.wa_status || 'unknown'
+    }));
+
+    renderTable(currentRows, 'results');
+    const csv = toCSV(currentRows);
+    dl.disabled = false;
+    dl.onclick = () => download(`leads_validados_${Date.now()}.csv`, csv);
+    prog.textContent = 'Validação concluída.';
+  } catch (e) {
+    console.error(e);
+    prog.textContent = 'Erro na validação: ' + e.message;
+  } finally {
+    btnVal.disabled = false; btnVal.textContent = 'Validar WhatsApp';
+  }
+});
+
+// CSV tab (permanece igual ao seu fluxo atual)
 let uploadedRows = [];
 document.getElementById('file').addEventListener('change', async (ev) => {
   const file = ev.target.files[0];
@@ -134,7 +206,7 @@ document.getElementById('validate-csv').addEventListener('click', async () => {
   const btn  = document.getElementById('validate-csv');
   const dl   = document.getElementById('download-csv');
   if (!uploadedRows.length) { alert('Faça upload do CSV primeiro.'); return; }
-  prog.textContent = 'Validando via Click-to-Chat...';
+  prog.textContent = 'Validando...';
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Validando...';
 
   try {
