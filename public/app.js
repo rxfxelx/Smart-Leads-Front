@@ -15,7 +15,7 @@ async function fetchStatus() {
       <div><b>Validador:</b> ${s.validationProvider}</div>
       <div><b>Busca:</b> ${s.searchMode}</div>
       <div class="hint" style="margin-top:8px">
-        Agora a busca <b>não valida</b> automaticamente. Clique em <b>Validar WhatsApp</b> se quiser validar os números retornados.
+        A busca <b>não valida automaticamente</b>. Clique em <b>Validar WhatsApp</b> se quiser validar os números retornados.
       </div>
     `;
   } catch (err) {
@@ -112,19 +112,13 @@ document.getElementById('run').addEventListener('click', async () => {
       body: JSON.stringify({ city, segment, total })
     });
     const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (!ct.includes('application/json')) {
-      throw new Error(`Resposta não é JSON (status ${r.status}).`);
-    }
+    if (!ct.includes('application/json')) throw new Error(`Resposta não é JSON (status ${r.status}).`);
     const data = await r.json();
     if (!data.ok) throw new Error(data.error || 'Falha');
 
-    // Garante que venham sem validação
-    currentRows = (data.rows || []).map(row => ({
-      ...row,
-      wa_status: row.wa_status || 'unvalidated'
-    }));
-
+    currentRows = (data.rows || []).map(row => ({ ...row, wa_status: row.wa_status || 'unvalidated' }));
     renderTable(currentRows, 'results');
+
     const csv = data.csv || toCSV(currentRows);
     dl.disabled = false;
     dl.onclick = () => download(`leads_${Date.now()}.csv`, csv);
@@ -179,7 +173,7 @@ document.getElementById('validate').addEventListener('click', async () => {
   }
 });
 
-// CSV tab (permanece igual ao seu fluxo atual)
+// CSV tab
 let uploadedRows = [];
 document.getElementById('file').addEventListener('change', async (ev) => {
   const file = ev.target.files[0];
@@ -216,6 +210,8 @@ document.getElementById('validate-csv').addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ numbers })
     });
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!ct.includes('application/json')) throw new Error(`Resposta não é JSON (status ${r.status}).`);
     const data = await r.json();
     if (!data.ok) throw new Error(data.error || 'Falha na validação');
 
