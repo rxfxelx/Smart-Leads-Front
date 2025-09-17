@@ -1,7 +1,9 @@
+const API_BASE = "https://smart-leads-back-production.up.railway.app";
+
 async function fetchStatus() {
   const el = document.getElementById('status');
   try {
-    const r = await fetch('/api/status');
+    const r = await fetch(`${API_BASE}/api/status`);
     const s = await r.json();
     el.innerHTML = `
       <div><b>Validador:</b> ${s.validationProvider}</div>
@@ -65,7 +67,7 @@ document.getElementById('run').addEventListener('click', async () => {
   prog.textContent = 'Abrindo buscador, visitando sites e validando no WhatsApp (UAZ/Click2Chat)...';
 
   try {
-    const r = await fetch('/api/run', {
+    const r = await fetch(`${API_BASE}/api/run`, {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({ city, segment, total })
